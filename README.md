@@ -6,4 +6,4 @@
 - タイトル、場所、日時の文字を入れられます（場所と日時は自動で入ります）
 - 写真はiPad / iPhoneの中だけで処理されるので、どこにもアップロードされません
 
-地図データ：[dataofjapan/land](https://github.com/dataofjapan/land)（国土数値情報をもとにした都道府県境界データ）
+地図データ：[dataofjapan/land](https://github.com/dataofjapan/land)（都道府県境界データ）
