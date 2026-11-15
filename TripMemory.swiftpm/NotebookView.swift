@@ -15,6 +15,7 @@ enum NoteInk {
 // 編集画面に渡す写真
 struct EditTarget: Identifiable {
     let id = UUID()
+    let photoID: UUID
     let data: Data
 }
 
@@ -112,7 +113,11 @@ struct NotebookView: View {
             if drawingLoaded { saveDrawing(d) }
         }
         .fullScreenCover(item: $editTarget) { t in
-            ContentView(initialData: t.data, closeTitle: "ノートに戻る", onClose: { editTarget = nil })
+            ContentView(initialData: t.data, closeTitle: "ノートに戻る",
+                        onClose: { editTarget = nil },
+                        onSaveToNote: { image in
+                            store.saveEdited(image, photoID: t.photoID, tripID: tripID)
+                        })
         }
         .fullScreenCover(item: $exported) { r in
             ResultView(result: r, editTitle: "ノートに戻る")
@@ -253,10 +258,13 @@ struct NotebookView: View {
                 EnlargedPhoto(image: store.thumbnail(tripID, photo), number: index + 1, photo: photo,
                               onEdit: {
                                   if let data = store.originalData(tripID, photo) {
-                                      editTarget = EditTarget(data: data)
+                                      editTarget = EditTarget(photoID: photo.id, data: data)
                                   }
                               },
                               onRemove: { removing = photo },
+                              onRevert: photo.edited == true ? {
+                                  store.revertEdited(photoID: photo.id, tripID: tripID)
+                              } : nil,
                               onClose: { selectedID = nil })
                     .frame(width: rects.photos.width, height: rects.photos.height)
                     .offset(x: rects.photos.minX, y: rects.photos.minY)
@@ -702,6 +710,7 @@ struct EnlargedPhoto: View {
     let photo: TripPhoto
     let onEdit: () -> Void
     let onRemove: () -> Void
+    let onRevert: (() -> Void)?
     let onClose: () -> Void
 
     var dateText: String {
@@ -742,10 +751,19 @@ struct EnlargedPhoto: View {
                     Button {
                         onEdit()
                     } label: {
-                        Label("地図付きの画像を作る", systemImage: "map")
+                        Label(photo.edited == true ? "作り直す" : "地図付きの画像を作る", systemImage: "map")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
+
+                    if let onRevert {
+                        Button {
+                            onRevert()
+                        } label: {
+                            Label("加工前に戻す", systemImage: "arrow.uturn.backward")
+                        }
+                        .buttonStyle(.bordered)
+                    }
 
                     Button(role: .destructive) {
                         onRemove()

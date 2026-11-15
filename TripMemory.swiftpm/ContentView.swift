@@ -7,11 +7,14 @@ struct ContentView: View {
     let initialData: Data?          // ノートから開いたときの写真
     let onClose: (() -> Void)?      // 戻るボタンを押したとき
     let closeTitle: String          // 戻るボタンの文字（例：ノートに戻る）
+    let onSaveToNote: ((UIImage) -> Void)?   // ノートから開いたとき：完成画像をノートに保存
 
-    init(initialData: Data? = nil, closeTitle: String = "閉じる", onClose: (() -> Void)? = nil) {
+    init(initialData: Data? = nil, closeTitle: String = "閉じる",
+         onClose: (() -> Void)? = nil, onSaveToNote: ((UIImage) -> Void)? = nil) {
         self.initialData = initialData
         self.closeTitle = closeTitle
         self.onClose = onClose
+        self.onSaveToNote = onSaveToNote
     }
 
     @State private var pickerItem: PhotosPickerItem?
@@ -77,9 +80,18 @@ struct ContentView: View {
             Task { await loadPhoto(item) }
         }
         .fullScreenCover(item: $result) { r in
-            ResultView(result: r, backTitle: closeTitle, onBack: onClose.map { close in
-                { result = nil; close() }
-            })
+            ResultView(result: r,
+                       backTitle: onSaveToNote == nil ? closeTitle : "保存せずに戻る",
+                       onBack: onClose.map { close in
+                           { result = nil; close() }
+                       },
+                       onSave: onSaveToNote.map { save in
+                           {
+                               save(r.image)
+                               result = nil
+                               onClose?()
+                           }
+                       })
         }
     }
 
@@ -781,6 +793,7 @@ struct ResultView: View {
     var backTitle = "戻る"
     var onBack: (() -> Void)? = nil      // ノートや本棚まで一気に戻る
     var editTitle = "編集に戻る"
+    var onSave: (() -> Void)? = nil      // ノートに保存して戻る
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -806,6 +819,17 @@ struct ResultView: View {
                         Label(editTitle, systemImage: "chevron.backward")
                     }
                     .buttonStyle(.bordered)
+
+                    if let onSave {
+                        Button {
+                            onSave()
+                        } label: {
+                            Label("ノートに保存して戻る", systemImage: "book.closed")
+                                .bold()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.orange)
+                    }
 
                     ShareLink(item: result.jpeg,
                               preview: SharePreview("TripMemory", image: Image(uiImage: result.image))) {

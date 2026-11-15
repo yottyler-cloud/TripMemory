@@ -11,6 +11,7 @@ struct TripPhoto: Codable, Identifiable, Equatable {
     var x: Double = 0.5          // ページの中の位置（幅・高さに対する割合）
     var y: Double = 0.5
     var rotation: Double = 0     // 少し傾けて貼る
+    var edited: Bool? = nil      // 地図などを重ねた画像に差し替えたか
 
     var coordinate: CLLocationCoordinate2D? {
         guard let latitude, let longitude else { return nil }
@@ -19,6 +20,7 @@ struct TripPhoto: Codable, Identifiable, Equatable {
 
     var fileName: String { id.uuidString + ".photo" }        // 元の写真（位置情報などもそのまま）
     var thumbName: String { id.uuidString + "_thumb.jpg" }   // ノートに表示する小さめの画像
+    var editedName: String { id.uuidString + "_edited.jpg" } // 地図などを重ねた画像
 }
 
 // 旅ノート1冊
@@ -179,8 +181,42 @@ final class TripStore: ObservableObject {
         let dir = folder(tripID)
         try? FileManager.default.removeItem(at: dir.appendingPathComponent(photo.fileName))
         try? FileManager.default.removeItem(at: dir.appendingPathComponent(photo.thumbName))
+        try? FileManager.default.removeItem(at: dir.appendingPathComponent(photo.editedName))
         imageCache.removeObject(forKey: photo.id.uuidString as NSString)
         update(tripID) { t in t.photos.removeAll { $0.id == photo.id } }
+    }
+
+    // 編集画面で作った画像を、ノートの写真として差し替える
+    func saveEdited(_ image: UIImage, photoID: UUID, tripID: UUID) {
+        guard let photo = trip(tripID)?.photos.first(where: { $0.id == photoID }) else { return }
+        let dir = folder(tripID)
+        if let jpg = image.jpegData(compressionQuality: 0.9) {
+            try? jpg.write(to: dir.appendingPathComponent(photo.editedName))
+        }
+        writeThumbnail(from: image, for: photo, in: dir)
+        update(tripID) { t in
+            if let i = t.photos.firstIndex(where: { $0.id == photoID }) { t.photos[i].edited = true }
+        }
+    }
+
+    // 加工前の写真に戻す
+    func revertEdited(photoID: UUID, tripID: UUID) {
+        guard let photo = trip(tripID)?.photos.first(where: { $0.id == photoID }) else { return }
+        let dir = folder(tripID)
+        try? FileManager.default.removeItem(at: dir.appendingPathComponent(photo.editedName))
+        if let data = originalData(tripID, photo), let original = UIImage(data: data) {
+            writeThumbnail(from: original, for: photo, in: dir)
+        }
+        update(tripID) { t in
+            if let i = t.photos.firstIndex(where: { $0.id == photoID }) { t.photos[i].edited = nil }
+        }
+    }
+
+    private func writeThumbnail(from image: UIImage, for photo: TripPhoto, in dir: URL) {
+        if let thumb = Self.makeThumbnail(image, maxSide: 1200), let jpg = thumb.jpegData(compressionQuality: 0.85) {
+            try? jpg.write(to: dir.appendingPathComponent(photo.thumbName))
+        }
+        imageCache.removeObject(forKey: photo.id.uuidString as NSString)
     }
 
     @MainActor
