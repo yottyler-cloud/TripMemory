@@ -2,12 +2,22 @@ import SwiftUI
 import PhotosUI
 import CoreLocation
 
+// 写真1枚に地図や文字を重ねる編集画面
 struct ContentView: View {
+    let initialData: Data?          // ノートから開いたときの写真
+    let onClose: (() -> Void)?      // 閉じるボタンを押したとき
+
+    init(initialData: Data? = nil, onClose: (() -> Void)? = nil) {
+        self.initialData = initialData
+        self.onClose = onClose
+    }
+
     @State private var pickerItem: PhotosPickerItem?
     @State private var info: PhotoInfo?
     @State private var place = ""
     @State private var layout = OverlayLayout()
-    @State private var mapLines: [MapLine] = []
+    @ObservedObject private var maps = MapStore.shared
+    var mapLines: [MapLine] { maps.lines }
     @State private var message = ""
     @State private var loading = false
     @State private var result: RenderResult?
@@ -51,9 +61,11 @@ struct ContentView: View {
         }
         .preferredColorScheme(.dark)
         .task {
-            do {
-                mapLines = try await MapData.load()
-            } catch {
+            if let initialData, info == nil {
+                await loadPhotoData(initialData)
+            }
+            await maps.loadIfNeeded()
+            if maps.failed {
                 message = "地図データを読み込めませんでした。通信状態を確認してください。"
             }
         }
@@ -83,6 +95,10 @@ struct ContentView: View {
                 Text(message).font(.footnote).foregroundStyle(.orange)
             }
             Text("v\(appVersion)").font(.caption).foregroundStyle(.gray)
+            if let onClose {
+                Button("閉じる") { onClose() }
+                    .buttonStyle(.bordered)
+            }
         }
     }
 
@@ -92,6 +108,15 @@ struct ContentView: View {
         VStack(spacing: 0) {
             // いちばん上：写真の選び直しと完了
             HStack(spacing: 10) {
+                if let onClose {
+                    Button {
+                        onClose()
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityLabel("閉じる")
+                }
                 PhotosPicker(selection: $pickerItem, matching: .images) {
                     Label("写真", systemImage: "photo")
                 }
@@ -283,8 +308,15 @@ struct ContentView: View {
     func loadPhoto(_ item: PhotosPickerItem) async {
         loading = true
         defer { loading = false }
-        guard let data = try? await item.loadTransferable(type: Data.self),
-              let loaded = PhotoLoader.load(data) else {
+        guard let data = try? await item.loadTransferable(type: Data.self) else {
+            message = "写真を読み込めませんでした"
+            return
+        }
+        await loadPhotoData(data)
+    }
+
+    func loadPhotoData(_ data: Data) async {
+        guard let loaded = PhotoLoader.load(data) else {
             message = "写真を読み込めませんでした"
             return
         }

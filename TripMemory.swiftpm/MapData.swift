@@ -27,16 +27,25 @@ enum MapData {
 
     static func load() async throws -> [MapLine] {
         async let lakes = loadLakes()
-        let (data, _) = try await URLSession.shared.data(from: url)
+        let data = try await cachedData(url, name: "japan.geojson")
         return parse(data, isLake: false) + (await lakes)
     }
 
     // 湖は読み込めなくても地図は出す
     static func loadLakes() async -> [MapLine] {
-        guard let result = try? await URLSession.shared.data(from: lakesURL) else { return [] }
-        let data = result.0
+        guard let data = try? await cachedData(lakesURL, name: "lakes.geojson") else { return [] }
         // 日本のまわり（経度122〜154度、緯度20〜46度）にある湖だけ残す
         return parse(data, isLake: true).filter { $0.maxX >= 122 && $0.minX <= 154 && $0.maxY >= 20 && $0.minY <= 46 }
+    }
+
+    // 一度読み込んだデータは端末に保存して、次からはそれを使う
+    static func cachedData(_ url: URL, name: String) async throws -> Data {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let file = dir.appendingPathComponent(name)
+        if let data = try? Data(contentsOf: file), !data.isEmpty { return data }
+        let (data, _) = try await URLSession.shared.data(from: url)
+        try? data.write(to: file)
+        return data
     }
 
     static func parse(_ data: Data, isLake: Bool) -> [MapLine] {
@@ -180,5 +189,35 @@ enum MapData {
             }
         }
         return path
+    }
+}
+
+// 地図データをアプリ全体で1回だけ読み込んで使い回す
+final class MapStore: ObservableObject {
+    static let shared = MapStore()
+
+    @Published private(set) var lines: [MapLine] = []
+    @Published private(set) var failed = false
+    private var loadingTask: Task<Void, Never>?
+
+    @MainActor
+    func loadIfNeeded() async {
+        if !lines.isEmpty { return }
+        if let task = loadingTask {
+            await task.value
+            return
+        }
+        let task = Task { @MainActor in
+            do {
+                let loaded = try await MapData.load()
+                self.lines = loaded
+                self.failed = false
+            } catch {
+                self.failed = true
+            }
+        }
+        loadingTask = task
+        await task.value
+        loadingTask = nil
     }
 }
