@@ -7,3 +7,8 @@
 - 写真はiPad / iPhoneの中だけで処理されるので、どこにもアップロードされません
 
 地図データ：[dataofjapan/land](https://github.com/dataofjapan/land)（都道府県境界データ）
+
+## Swift版（iPad / Swift Playgrounds）
+
+`TripMemory.swiftpm` フォルダが Swift Playgrounds で開けるアプリ本体です。
+アプリ内の版番号は `MyApp.swift` の `appVersion` で管理しています。
