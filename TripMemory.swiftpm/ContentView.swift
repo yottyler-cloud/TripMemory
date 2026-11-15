@@ -14,7 +14,8 @@ struct ContentView: View {
 
     @State private var pickerItem: PhotosPickerItem?
     @State private var info: PhotoInfo?
-    @State private var place = ""
+    @State private var placeNames = PlaceNames()
+    var place: String { layout.placeText(placeNames) }
     @State private var layout = OverlayLayout()
     @ObservedObject private var maps = MapStore.shared
     var mapLines: [MapLine] { maps.lines }
@@ -236,6 +237,24 @@ struct ContentView: View {
 
             if selectedText == .place {
                 VStack(alignment: .leading, spacing: 6) {
+                    Text("地名の細かさ").foregroundStyle(.secondary)
+                    Picker("地名の細かさ", selection: $layout.placeDetail) {
+                        ForEach(PlaceDetail.allCases, id: \.self) { d in
+                            Text(d.name).tag(d)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("地名の言葉").foregroundStyle(.secondary)
+                    Picker("地名の言葉", selection: $layout.placeLanguage) {
+                        ForEach(PlaceLanguage.allCases, id: \.self) { l in
+                            Text(l.name).tag(l)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                VStack(alignment: .leading, spacing: 6) {
                     Text("地名の前のマーク").foregroundStyle(.secondary)
                     Picker("地名の前のマーク", selection: $layout.placeMark) {
                         ForEach(PlaceMark.allCases, id: \.self) { m in
@@ -323,10 +342,13 @@ struct ContentView: View {
         info = loaded
         layout = OverlayLayout.initial(for: loaded.image.size, keeping: layout)
         moveMapContent = false
-        place = ""
+        placeNames = PlaceNames()
         if let c = loaded.coordinate {
             message = mapLines.isEmpty ? message : ""
-            place = await PhotoLoader.placeName(for: c)
+            placeNames = await PhotoLoader.placeNames(for: c)
+            if !placeNames.isJapan {
+                message = "このアプリは日本国内で撮った写真向けです。地図や地名が出ないことがあります。"
+            }
         } else {
             message = "この写真には位置情報が入っていませんでした。"
         }

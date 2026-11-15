@@ -48,13 +48,28 @@ enum PhotoLoader {
     }
 
     // 場所の名前（例：Fukushima, Japan）
-    static func placeName(for c: CLLocationCoordinate2D) async -> String {
+    // 県・市・町の名前（日本語と英語）
+    static func placeNames(for c: CLLocationCoordinate2D) async -> PlaceNames {
         let location = CLLocation(latitude: c.latitude, longitude: c.longitude)
-        let geocoder = CLGeocoder()
-        if let placemarks = try? await geocoder.reverseGeocodeLocation(location, preferredLocale: Locale(identifier: "en_US")),
-           let pm = placemarks.first {
-            return [pm.administrativeArea, pm.country].compactMap { $0 }.joined(separator: ", ")
+        var names = PlaceNames()
+        if let pm = try? await CLGeocoder().reverseGeocodeLocation(location, preferredLocale: Locale(identifier: "ja_JP")).first {
+            names.prefJa = pm.administrativeArea ?? ""
+            names.cityJa = pm.locality ?? ""
+            names.townJa = pm.subLocality ?? ""
+            names.isJapan = (pm.isoCountryCode ?? "JP") == "JP"
         }
-        return ""
+        if let pm = try? await CLGeocoder().reverseGeocodeLocation(location, preferredLocale: Locale(identifier: "en_US")).first {
+            names.prefEn = pm.administrativeArea ?? ""
+            names.cityEn = pm.locality ?? ""
+            names.townEn = pm.subLocality ?? ""
+        }
+        return names
     }
+}
+
+// 撮影地の名前
+struct PlaceNames {
+    var prefJa = "", cityJa = "", townJa = ""
+    var prefEn = "", cityEn = "", townEn = ""
+    var isJapan = true
 }

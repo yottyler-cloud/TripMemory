@@ -55,6 +55,8 @@ struct OverlayLayout {
                         color: UIColor(red: 0.84, green: 0.2, blue: 0.17, alpha: 1))
     var hereMark: HereMark = .none
     var placeMark: PlaceMark = .starPin
+    var placeDetail: PlaceDetail = .city         // 地名をどこまで細かく出すか
+    var placeLanguage: PlaceLanguage = .japanese // 地名の言葉
     var dateStyle: DateStyle = .full
     var dateNotation: DateNotation = .slash
     var showTime = true
@@ -91,6 +93,8 @@ struct OverlayLayout {
         l.showCoordinate = old.showCoordinate
         l.hereMark = old.hereMark
         l.placeMark = old.placeMark
+        l.placeDetail = old.placeDetail
+        l.placeLanguage = old.placeLanguage
         guard size.width > 0, size.height > 0 else { return l }
 
         let base = min(size.width, size.height)
@@ -134,6 +138,23 @@ struct OverlayLayout {
     func mapViewCenter(for c: CLLocationCoordinate2D) -> CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: c.latitude + Double(mapOffset.y),
                                longitude: c.longitude + Double(mapOffset.x))
+    }
+
+    // 地名の文字（例：福島県 いわき市 小名浜 / Onahama, Iwaki, Fukushima）
+    func placeText(_ n: PlaceNames) -> String {
+        var parts: [String]
+        switch placeLanguage {
+        case .japanese:
+            parts = [n.prefJa]
+            if placeDetail != .prefecture { parts.append(n.cityJa) }
+            if placeDetail == .town { parts.append(n.townJa) }
+            return parts.filter { !$0.isEmpty }.joined(separator: " ")
+        case .english:
+            parts = [n.prefEn]
+            if placeDetail != .prefecture { parts.insert(n.cityEn, at: 0) }
+            if placeDetail == .town { parts.insert(n.townEn, at: 0) }
+            return parts.filter { !$0.isEmpty }.joined(separator: ", ")
+        }
     }
 
     // 日時の文字（出さないときは nil）
@@ -196,6 +217,31 @@ enum DateNotation: String, CaseIterable {
         case .slash: return "2026/06/01"
         case .kanji: return "2026年6月1日"
         case .dmy: return "01/06/2026（日/月/年）"
+        }
+    }
+}
+
+// 地名の細かさ
+enum PlaceDetail: String, CaseIterable {
+    case prefecture, city, town
+
+    var name: String {
+        switch self {
+        case .prefecture: return "県"
+        case .city: return "市まで"
+        case .town: return "町まで"
+        }
+    }
+}
+
+// 地名の言葉
+enum PlaceLanguage: String, CaseIterable {
+    case japanese, english
+
+    var name: String {
+        switch self {
+        case .japanese: return "日本語"
+        case .english: return "English"
         }
     }
 }

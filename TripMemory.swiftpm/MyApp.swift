@@ -1,7 +1,7 @@
 import SwiftUI
 
 // アプリの版番号（新しい版を出すたびに数字を上げる）
-let appVersion = "017"
+let appVersion = "018"
 
 @main
 struct MyApp: App {
