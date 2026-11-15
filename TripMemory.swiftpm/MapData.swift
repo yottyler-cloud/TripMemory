@@ -112,7 +112,7 @@ enum MapData {
 
     static func layers(lines: [MapLine], in rect: CGRect, center c: CLLocationCoordinate2D,
                        spanKm: Double, prefGroup: Int?) -> Layers {
-        var result = Layers()
+        let result = Layers()
         guard rect.height > 0, rect.width > 0 else { return result }
         let lat0 = CGFloat(c.latitude), lon0 = CGFloat(c.longitude)
         let degLat = CGFloat(spanKm / 111)

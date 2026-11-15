@@ -18,8 +18,8 @@ let package = Package(
             targets: ["AppModule"],
             bundleIdentifier: "com.yottyler.TripMemory",
             teamIdentifier: "",
-            displayVersion: "0.20",
-            bundleVersion: "20",
+            displayVersion: "0.21",
+            bundleVersion: "21",
             appIcon: .placeholder(icon: .map),
             accentColor: .presetColor(.blue),
             supportedDeviceFamilies: [
