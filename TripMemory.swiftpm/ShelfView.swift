@@ -101,7 +101,7 @@ struct ShelfView: View {
         .foregroundStyle(.white)
         .background(Color(white: 0.16).ignoresSafeArea())
         .fullScreenCover(isPresented: $singleEdit) {
-            ContentView(onClose: { singleEdit = false })
+            ContentView(closeTitle: "本棚に戻る", onClose: { singleEdit = false })
         }
         .confirmationDialog("このノートを削除しますか？",
                             isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),

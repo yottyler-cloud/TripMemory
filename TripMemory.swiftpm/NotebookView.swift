@@ -112,10 +112,10 @@ struct NotebookView: View {
             if drawingLoaded { saveDrawing(d) }
         }
         .fullScreenCover(item: $editTarget) { t in
-            ContentView(initialData: t.data, onClose: { editTarget = nil })
+            ContentView(initialData: t.data, closeTitle: "ノートに戻る", onClose: { editTarget = nil })
         }
         .fullScreenCover(item: $exported) { r in
-            ResultView(result: r)
+            ResultView(result: r, editTitle: "ノートに戻る")
         }
         .confirmationDialog("この写真をノートから外しますか？",
                             isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),

@@ -5,10 +5,12 @@ import CoreLocation
 // 写真1枚に地図や文字を重ねる編集画面
 struct ContentView: View {
     let initialData: Data?          // ノートから開いたときの写真
-    let onClose: (() -> Void)?      // 閉じるボタンを押したとき
+    let onClose: (() -> Void)?      // 戻るボタンを押したとき
+    let closeTitle: String          // 戻るボタンの文字（例：ノートに戻る）
 
-    init(initialData: Data? = nil, onClose: (() -> Void)? = nil) {
+    init(initialData: Data? = nil, closeTitle: String = "閉じる", onClose: (() -> Void)? = nil) {
         self.initialData = initialData
+        self.closeTitle = closeTitle
         self.onClose = onClose
     }
 
@@ -75,7 +77,9 @@ struct ContentView: View {
             Task { await loadPhoto(item) }
         }
         .fullScreenCover(item: $result) { r in
-            ResultView(result: r)
+            ResultView(result: r, backTitle: closeTitle, onBack: onClose.map { close in
+                { result = nil; close() }
+            })
         }
     }
 
@@ -97,7 +101,7 @@ struct ContentView: View {
             }
             Text("v\(appVersion)").font(.caption).foregroundStyle(.gray)
             if let onClose {
-                Button("閉じる") { onClose() }
+                Button(closeTitle) { onClose() }
                     .buttonStyle(.bordered)
             }
         }
@@ -113,10 +117,9 @@ struct ContentView: View {
                     Button {
                         onClose()
                     } label: {
-                        Image(systemName: "xmark")
+                        Label(closeTitle, systemImage: "chevron.backward")
                     }
                     .buttonStyle(.bordered)
-                    .accessibilityLabel("閉じる")
                 }
                 PhotosPicker(selection: $pickerItem, matching: .images) {
                     Label("写真", systemImage: "photo")
@@ -775,6 +778,9 @@ struct InfoLabel: View {
 
 struct ResultView: View {
     let result: RenderResult
+    var backTitle = "戻る"
+    var onBack: (() -> Void)? = nil      // ノートや本棚まで一気に戻る
+    var editTitle = "編集に戻る"
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -785,10 +791,19 @@ struct ResultView: View {
                     .resizable()
                     .scaledToFit()
                 HStack(spacing: 16) {
+                    if let onBack {
+                        Button {
+                            onBack()
+                        } label: {
+                            Label(backTitle, systemImage: "chevron.backward.2")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
                     Button {
                         dismiss()
                     } label: {
-                        Label("編集に戻る", systemImage: "chevron.backward")
+                        Label(editTitle, systemImage: "chevron.backward")
                     }
                     .buttonStyle(.bordered)
 
