@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="TripMemory">
+<title>TripMemory</title>
+<style>
+  :root { color-scheme: dark; --bg:#14161a; --panel:#1e2127; --line:#2e323a; --text:#e8eaed; --sub:#9aa0a6; --accent:#3b9cff; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif; }
+  header { padding:14px 18px; font-weight:700; font-size:20px; border-bottom:1px solid var(--line); }
+  main { display:grid; grid-template-columns: 1fr; gap:16px; padding:16px; max-width:1400px; margin:0 auto; }
+  @media (min-width: 900px) { main { grid-template-columns: 1fr 340px; align-items:start; } }
+  .preview { background:#000; border-radius:12px; overflow:hidden; min-height:200px; display:flex; align-items:center; justify-content:center; }
+  .preview canvas { width:100%; height:auto; display:block; }
+  .empty { color:var(--sub); padding:60px 20px; text-align:center; line-height:1.8; }
+  .panel { background:var(--panel); border-radius:12px; padding:16px; display:flex; flex-direction:column; gap:14px; }
+  label { font-size:13px; color:var(--sub); display:block; margin-bottom:6px; }
+  input[type=text], textarea, select { width:100%; font-size:16px; padding:10px 12px; border-radius:8px; border:1px solid var(--line); background:#111317; color:var(--text); font-family:inherit; }
+  textarea { resize:vertical; min-height:96px; }
+  input[type=range] { width:100%; }
+  .btn { display:block; width:100%; padding:14px; font-size:17px; font-weight:700; border:none; border-radius:10px; background:var(--accent); color:#fff; text-align:center; cursor:pointer; }
+  .btn.secondary { background:#2f343c; }
+  .btn:disabled { opacity:.4; }
+  .note { font-size:13px; line-height:1.6; padding:10px 12px; border-radius:8px; background:#2a2f37; display:none; }
+  .note.warn { background:#4a3a1c; color:#ffd58a; }
+  .row { display:flex; gap:10px; }
+  .row > * { flex:1; }
+  #saveView { position:fixed; inset:0; background:rgba(0,0,0,.92); display:none; flex-direction:column; align-items:center; justify-content:center; padding:20px; gap:14px; z-index:10; }
+  #saveView img { max-width:100%; max-height:75vh; border-radius:8px; }
+  #saveView p { margin:0; color:#fff; }
+</style>
+</head>
+<body>
+<header>TripMemory</header>
+<main>
+  <div class="preview" id="preview">
+    <div class="empty" id="empty">写真を選ぶと、ここに完成イメージが表示されます</div>
+    <canvas id="canvas" hidden></canvas>
+  </div>
+
+  <div class="panel">
+    <label class="btn" for="file">写真を選ぶ</label>
+    <input type="file" id="file" accept="image/*" hidden>
+    <div class="note" id="note"></div>
+
+    <div>
+      <label for="title">タイトル（改行できます）</label>
+      <textarea id="title" placeholder="例：SSTR2026&#10;Coast2Coast&#10;UsuisoBeach"></textarea>
+    </div>
+    <div>
+      <label for="place">場所</label>
+      <input type="text" id="place" placeholder="自動で入ります">
+    </div>
+    <div>
+      <label for="date">日時</label>
+      <input type="text" id="date" placeholder="自動で入ります">
+    </div>
+    <div>
+      <label for="latlon">撮影地の位置（緯度, 経度）</label>
+      <input type="text" id="latlon" placeholder="例：36.93, 140.88" inputmode="decimal">
+    </div>
+    <div>
+      <label for="span">地図の範囲：<span id="spanVal"></span> km</label>
+      <input type="range" id="span" min="40" max="800" step="10" value="250">
+    </div>
+    <div class="row">
+      <div>
+        <label for="mapPos">地図の位置</label>
+        <select id="mapPos"><option value="bl">左下</option><option value="br">右下</option><option value="none">表示しない</option></select>
+      </div>
+      <div>
+        <label for="textSize">文字の大きさ</label>
+        <select id="textSize"><option value="0.85">小</option><option value="1" selected>中</option><option value="1.2">大</option></select>
+      </div>
+    </div>
+    <button class="btn" id="save" disabled>画像を保存</button>
+  </div>
+</main>
+
+<div id="saveView">
+  <img id="saveImg" alt="完成画像">
+  <p>画像を長押しして「写真に保存」を選んでください</p>
+  <button class="btn secondary" id="closeSave" style="max-width:320px">閉じる</button>
+</div>
+
+<script>
+// ===== 設定 =====
+// 都道府県の境界データ（海岸線・県境）
+const MAP_URL = 'https://cdn.jsdelivr.net/gh/dataofjapan/land@master/japan.geojson';
+
+const $ = id => document.getElementById(id);
+const canvas = $('canvas'), ctx = canvas.getContext('2d');
+let photo = null;        // 読み込んだ写真
+let point = null;        // {lat, lon}
+let mapData = null;      // 都道府県ポリゴン [{nameEn, nameJa, rings:[[[lon,lat],...]]}]
+let placeEdited = false;
+
+// ===== 地図データの読み込み =====
+const mapReady = fetch(MAP_URL).then(r => r.json()).then(geo => {
+  mapData = geo.features.map(f => {
+    const p = f.properties || {};
+    const g = f.geometry;
+    const polys = g.type === 'Polygon' ? [g.coordinates] : g.coordinates;
+    const rings = [];
+    polys.forEach(poly => poly.forEach(ring => rings.push(ring)));
+    return { nameEn: toEnglishPref(p.nam || ''), nameJa: p.nam_ja || '', rings, bbox: bboxOf(rings) };
+  });
+  draw();
+}).catch(e => showNote('地図データを読み込めませんでした。通信状態を確認して、ページを開き直してください。', true));
+
+function toEnglishPref(nam) {
+  if (/^Hokkai/i.test(nam)) return 'Hokkaido';
+  return nam.replace(/\s*(Ken|To|Fu|Do)$/i, '').trim();
+}
+function bboxOf(rings) {
+  let a = [180, 90, -180, -90];
+  rings.forEach(r => r.forEach(([x, y]) => { a[0] = Math.min(a[0], x); a[1] = Math.min(a[1], y); a[2] = Math.max(a[2], x); a[3] = Math.max(a[3], y); }));
+  return a;
+}
+function inRing(x, y, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+function findPref(lat, lon) {
+  if (!mapData) return null;
+  for (const pref of mapData) {
+    const b = pref.bbox;
+    if (lon < b[0] || lon > b[2] || lat < b[1] || lat > b[3]) continue;
+    if (pref.rings.some(r => inRing(lon, lat, r))) return pref;
+  }
+  // 海岸沿いで外れた場合は一番近い県
+  let best = null, bestD = Infinity;
+  for (const pref of mapData) for (const r of pref.rings) for (const [x, y] of r) {
+    const d = (x - lon) ** 2 + (y - lat) ** 2;
+    if (d < bestD) { bestD = d; best = pref; }
+  }
+  return bestD < 0.05 ? best : null;
+}
+
+// ===== 写真の位置情報（EXIF）を読む =====
+function readExif(buf) {
+  const v = new DataView(buf);
+  if (v.getUint16(0) !== 0xFFD8) return null; // JPEGでない
+  let off = 2;
+  while (off < v.byteLength - 4) {
+    const marker = v.getUint16(off);
+    const size = v.getUint16(off + 2);
+    if (marker === 0xFFE1 && v.getUint32(off + 4) === 0x45786966) return parseTiff(v, off + 10);
+    if ((marker & 0xFF00) !== 0xFF00) break;
+    off += 2 + size;
+  }
+  return null;
+}
+function parseTiff(v, t) {
+  const le = v.getUint16(t) === 0x4949;
+  const u16 = o => v.getUint16(t + o, le), u32 = o => v.getUint32(t + o, le);
+  const readIfd = o => {
+    const n = u16(o), tags = {};
+    for (let i = 0; i < n; i++) {
+      const e = o + 2 + i * 12;
+      tags[u16(e)] = { type: u16(e + 2), count: u32(e + 4), valOff: e + 8 };
+    }
+    return tags;
+  };
+  const rationals = tag => {
+    const p = u32(tag.valOff), out = [];
+    for (let i = 0; i < tag.count; i++) out.push(u32(p + i * 8) / u32(p + i * 8 + 4));
+    return out;
+  };
+  const ascii = tag => {
+    const p = tag.count > 4 ? u32(tag.valOff) : tag.valOff;
+    let s = ''; for (let i = 0; i < tag.count - 1; i++) s += String.fromCharCode(v.getUint8(t + p + i)); return s;
+  };
+  const res = {};
+  const ifd0 = readIfd(u32(4));
+  if (ifd0[0x8769]) {
+    const ex = readIfd(u32(ifd0[0x8769].valOff));
+    const dt = ex[0x9003] || ex[0x9004];
+    if (dt) res.date = ascii(dt);
+  }
+  if (!res.date && ifd0[0x0132]) res.date = ascii(ifd0[0x0132]);
+  if (ifd0[0x8825]) {
+    const g = readIfd(u32(ifd0[0x8825].valOff));
+    if (g[2] && g[4]) {
+      const dms = a => a[0] + a[1] / 60 + a[2] / 3600;
+      let lat = dms(rationals(g[2])), lon = dms(rationals(g[4]));
+      if (g[1] && String.fromCharCode(v.getUint8(g[1].valOff)) === 'S') lat = -lat;
+      if (g[3] && String.fromCharCode(v.getUint8(g[3].valOff)) === 'W') lon = -lon;
+      if (isFinite(lat) && isFinite(lon) && !(lat === 0 && lon === 0)) res.gps = { lat, lon };
+    }
+  }
+  return res;
+}
+function formatDate(s) {
+  const m = /^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2})/.exec(s || '');
+  return m ? `${m[1]}/${m[2]}/${m[3]} ${+m[4]}:${m[5]}` : '';
+}
+
+// ===== 写真を選んだとき =====
+$('file').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  showNote('');
+  let info = null;
+  try { info = readExif(await file.arrayBuffer()); } catch (err) { info = null; }
+
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = async () => {
+    photo = img;
+    $('empty').hidden = true; canvas.hidden = false; $('save').disabled = false;
+    $('date').value = formatDate(info && info.date);
+    if (info && info.gps) {
+      point = info.gps;
+      $('latlon').value = point.lat.toFixed(5) + ', ' + point.lon.toFixed(5);
+      await mapReady;
+      autoPlace();
+    } else {
+      point = null; $('latlon').value = '';
+      showNote('この写真には位置情報が入っていませんでした。「撮影地の位置」に緯度・経度を入力すると地図が表示されます（Googleマップで場所を長押しすると表示される数字です）。', true);
+    }
+    draw();
+  };
+  img.onerror = () => showNote('この写真は読み込めませんでした。', true);
+  img.src = url;
+});
+
+function autoPlace() {
+  if (placeEdited || !point) return;
+  const pref = findPref(point.lat, point.lon);
+  $('place').value = pref ? `${pref.nameEn}, Japan` : 'Japan';
+}
+
+function showNote(msg, warn) {
+  const n = $('note');
+  n.textContent = msg; n.style.display = msg ? 'block' : 'none';
+  n.className = 'note' + (warn ? ' warn' : '');
+}
+
+// ===== 入力の変更 =====
+['title', 'date', 'mapPos', 'textSize'].forEach(id => $(id).addEventListener('input', draw));
+$('place').addEventListener('input', () => { placeEdited = true; draw(); });
+$('span').addEventListener('input', () => { $('spanVal').textContent = $('span').value; draw(); });
+$('spanVal').textContent = $('span').value;
+$('latlon').addEventListener('change', () => {
+  const m = $('latlon').value.match(/(-?\d+(?:\.\d+)?)\s*[, 、]\s*(-?\d+(?:\.\d+)?)/);
+  if (m) { point = { lat: +m[1], lon: +m[2] }; showNote(''); autoPlace(); }
+  else if (!$('latlon').value.trim()) point = null;
+  draw();
+});
+
+// ===== 描画 =====
+function draw() {
+  if (!photo) return;
+  // iPadのメモリ上限に収まるよう、大きすぎる写真は縮小
+  const maxPixels = 12e6;
+  const s = Math.min(1, Math.sqrt(maxPixels / (photo.naturalWidth * photo.naturalHeight)));
+  const W = Math.round(photo.naturalWidth * s), H = Math.round(photo.naturalHeight * s);
+  canvas.width = W; canvas.height = H;
+  ctx.drawImage(photo, 0, 0, W, H);
+
+  const base = Math.min(W, H);          // 文字や地図の大きさの基準
+  const k = +$('textSize').value;
+  const margin = base * 0.065;
+
+  // --- 地図 ---
+  const pos = $('mapPos').value;
+  if (point && mapData && pos !== 'none') {
+    const bw = base * 0.30, bh = base * 0.45;
+    const bx = pos === 'br' ? W - margin - bw : margin;
+    const by = H - margin - bh;
+    drawMap(bx, by, bw, bh, base);
+  }
+
+  // --- 文字 ---
+  ctx.save();
+  ctx.textBaseline = 'top';
+  ctx.shadowColor = 'rgba(0,0,0,0.55)';
+  ctx.shadowBlur = base * 0.012;
+  ctx.shadowOffsetY = base * 0.002;
+  let y = margin;
+  const x = margin;
+  const tSize = base * 0.068 * k;
+  ctx.fillStyle = '#fff';
+  ctx.font = `700 ${tSize}px -apple-system, "SF Pro Display", "Helvetica Neue", "Hiragino Sans", sans-serif`;
+  $('title').value.split('\n').forEach(line => { ctx.fillText(line, x, y); y += tSize * 1.08; });
+
+  const sSize = base * 0.032 * k;
+  y += sSize * 0.6;
+  if ($('place').value.trim()) {
+    drawPin(x + sSize * 0.55, y - sSize * 0.1, sSize * 1.25);
+    ctx.fillStyle = '#fff';
+    ctx.font = `600 ${sSize}px -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif`;
+    ctx.fillText($('place').value, x + sSize * 2.3, y);
+    y += sSize * 1.9;
+  }
+  if ($('date').value.trim()) {
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.font = `500 ${sSize}px -apple-system, "Helvetica Neue", "Hiragino Sans", sans-serif`;
+    ctx.fillText($('date').value, x, y);
+  }
+  ctx.restore();
+}
+
+function drawMap(bx, by, bw, bh, base) {
+  const spanKm = +$('span').value;
+  const degLat = spanKm / 111;                      // 縦方向の範囲（度）
+  const sc = bh / degLat;                            // 1度あたりのピクセル（緯度）
+  const cosLat = Math.cos(point.lat * Math.PI / 180);
+  const cx = bx + bw / 2, cy = by + bh / 2;
+  const px = lon => cx + (lon - point.lon) * sc * cosLat;
+  const py = lat => cy - (lat - point.lat) * sc;
+  const halfLon = (bw / 2) / (sc * cosLat), halfLat = degLat / 2;
+
+  ctx.save();
+  ctx.beginPath(); ctx.rect(bx, by, bw, bh); ctx.clip();
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = Math.max(2, base * 0.004);
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  ctx.shadowColor = 'rgba(0,0,0,0.45)'; ctx.shadowBlur = base * 0.006;
+  ctx.beginPath();
+  for (const pref of mapData) {
+    const b = pref.bbox;
+    if (b[2] < point.lon - halfLon || b[0] > point.lon + halfLon || b[3] < point.lat - halfLat || b[1] > point.lat + halfLat) continue;
+    for (const ring of pref.rings) {
+      ring.forEach(([lon, lat], i) => i ? ctx.lineTo(px(lon), py(lat)) : ctx.moveTo(px(lon), py(lat)));
+    }
+  }
+  ctx.stroke();
+  ctx.restore();
+
+  // 現在地の青い点
+  const r = base * 0.013;
+  ctx.save();
+  ctx.fillStyle = 'rgba(59,156,255,0.28)';
+  ctx.beginPath(); ctx.arc(cx, cy, r * 2.6, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = r * 0.6;
+  ctx.beginPath(); ctx.arc(cx, cy, r * 1.35, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#2f8cff';
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+// 赤いピンのアイコン
+function drawPin(cx, top, h) {
+  ctx.save();
+  ctx.shadowBlur = 0;
+  const red = '#ff3b30';
+  const hr = h * 0.17;             // 頭の半径
+  const hy = top + hr;
+  // 足元の楕円
+  ctx.strokeStyle = red; ctx.lineWidth = h * 0.09;
+  ctx.beginPath(); ctx.ellipse(cx, top + h * 0.8, h * 0.38, h * 0.15, 0, 0, Math.PI * 2); ctx.stroke();
+  // 針
+  ctx.lineWidth = h * 0.08; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(cx, hy); ctx.lineTo(cx, top + h * 0.8); ctx.stroke();
+  // 頭
+  ctx.fillStyle = red;
+  ctx.beginPath(); ctx.arc(cx, hy, hr, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.beginPath(); ctx.arc(cx - hr * 0.3, hy - hr * 0.3, hr * 0.3, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+// ===== 保存 =====
+$('save').addEventListener('click', () => {
+  canvas.toBlob(async blob => {
+    const name = 'tripmemory-' + Date.now() + '.jpg';
+    const file = new File([blob], name, { type: 'image/jpeg' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file] }); return; }
+      catch (err) { if (err.name === 'AbortError') return; }
+    }
+    $('saveImg').src = URL.createObjectURL(blob);
+    $('saveView').style.display = 'flex';
+  }, 'image/jpeg', 0.92);
+});
+$('closeSave').addEventListener('click', () => { $('saveView').style.display = 'none'; });
+</script>
+</body>
+</html>
